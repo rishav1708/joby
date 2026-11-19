@@ -1,0 +1,32 @@
+name: ci
+on:
+  push:
+  schedule:
+    - cron: "30 1 * * *"  # daily job refresh, 07:00 IST
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -r requirements.txt
+      - run: GOOGLE_API_KEY=x python -m pytest -q
+  refresh-index:
+    if: github.event_name != 'push'
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -r requirements.txt
+      - run: python -m jobpilot.ingest
+      - run: python -c "from jobpilot.retrieve import Index; Index.build()"
+        env: { GOOGLE_API_KEY: "${{ secrets.GOOGLE_API_KEY }}" }
+      - run: |
+          git config user.name "jobpilot-bot" && git config user.email "actions@users.noreply.github.com"
+          git add data/jobs.jsonl data/vectors.npz && git commit -m "daily job refresh" && git push || echo "no changes"

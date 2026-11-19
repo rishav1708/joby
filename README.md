@@ -1,0 +1,68 @@
+# JobPilot
+
+A multimodal job-matching agent. It reads a resume (PDF, scan or screenshot) with a vision-language model, retrieves matching **live** job postings with hybrid RAG, and a **LangGraph** agent grades, re-queries and writes a grounded gap analysis. Everything runs on the Gemini free tier.
+
+```
+resume.pdf / .png
+      │
+  [parse]  Gemini VLM ──► Profile (Pydantic, structured output)
+      │
+  [retrieve]  BM25 ─┐
+              FAISS ┴─► RRF fusion ─► cross-encoder rerank (MiniLM)
+      │
+  [grade]  LLM judges each hit ──► < 3 relevant? ──► [rewrite] query ──┐
+      │                                                               │
+      │◄──────────────────────────── (max 2 rewrites) ───────────────┘
+  [analyze]  RAG over the top job descriptions ─► fit score, gaps, tailored bullets (cited by job id)
+
+chat agent: Gemini + tools (search_jobs, get_job), memory via LangGraph SQLite checkpointer
+```
+
+## What's in here
+
+| Path | What it does |
+|---|---|
+| `jobpilot/ingest.py` | Pulls live postings from Greenhouse, Lever and Remotive public APIs. Runs daily in CI. |
+| `jobpilot/retrieve.py` | BM25 + Gemini embeddings in FAISS, fused with reciprocal rank fusion, reranked by a cross-encoder. Only new postings get embedded. |
+| `jobpilot/vlm.py` | Gemini vision reads resumes and job-post screenshots into Pydantic schemas. Also a text-layer/OCR baseline for comparison. |
+| `jobpilot/graph.py` | Two LangGraph graphs: the corrective-RAG match pipeline and a tool-calling chat agent with persistent memory. |
+| `evals/retrieval.py` | Recall@10, nDCG@10, MRR for BM25 vs dense vs hybrid vs hybrid+rerank. Labels by LLM pooling, then hand-checked. |
+| `evals/vlm.py` | Skill-extraction F1: VLM vs pypdf/OCR + LLM baseline on hand-labelled docs. |
+| `evals/rag.py` | RAGAS Faithfulness and Response Relevancy for the gap-analysis reports. |
+| `app.py` | Gradio demo (deployable to Hugging Face Spaces). |
+
+## Run it
+
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+export GOOGLE_API_KEY=...            # free key from aistudio.google.com
+python -m jobpilot.ingest            # fetch jobs -> data/jobs.jsonl
+python -m jobpilot.retrieve "junior ML engineer pytorch"   # first run embeds the jobs
+python -m jobpilot.graph my_resume.pdf
+python app.py
+```
+
+Offline tests (no key needed): `GOOGLE_API_KEY=x python -m pytest -q`
+
+Models default to `gemini-3.5-flash` and `gemini-embedding-001`; override with `JOBPILOT_LLM` / `JOBPILOT_EMBED`.
+
+## Results
+
+_Fill in after running the evals._
+
+| Retrieval (30 queries) | Recall@10 | nDCG@10 | MRR |
+|---|---|---|---|
+| BM25 | | | |
+| Dense (Gemini + FAISS) | | | |
+| Hybrid (RRF) | | | |
+| Hybrid + rerank | | | |
+
+| Extraction (n docs) | Skill F1 |
+|---|---|
+| pypdf / OCR + LLM | |
+| Gemini VLM | |
+
+| RAG (n resumes) | Faithfulness | Response relevancy |
+|---|---|---|
+| JobPilot | | |
