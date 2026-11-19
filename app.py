@@ -2,6 +2,7 @@
 
     python app.py      # then open http://127.0.0.1:7860
 """
+import html
 import json
 import time
 import uuid
@@ -21,6 +22,16 @@ CSS = """
        background: var(--background-fill-secondary)}
 .step b {display: block; margin-bottom: .3rem}
 .arrow {align-self: center; font-size: 1.4rem; opacity: .6}
+.rating {display: flex; flex-wrap: wrap; gap: 1.5rem; align-items: center; padding: 1rem;
+         border: 1px solid var(--border-color-primary); border-radius: 12px; background: var(--background-fill-secondary)}
+.score {width: 120px; height: 120px; border-radius: 50%; display: grid; place-items: center; font-size: 2.2rem;
+        font-weight: 700; border: 8px solid var(--c)}
+.score small {display: block; font-size: .8rem; font-weight: 400; opacity: .7; margin-top: -1.6rem}
+.bars {flex: 1 1 280px} .bar {margin: .35rem 0} .bar .lbl {display: flex; justify-content: space-between}
+.track {height: 8px; border-radius: 4px; background: var(--border-color-primary)}
+.fill {height: 8px; border-radius: 4px; background: var(--color-accent)}
+.reason {font-size: .85rem; opacity: .75}
+.fixes {flex: 1 1 260px} .fixes ol {margin: .3rem 0 0 1.1rem}
 """
 
 PIPELINE = """
@@ -34,8 +45,8 @@ PIPELINE = """
   <div class="step"><b>3 · Grade &amp; retry (LangGraph)</b>An LLM grades each job. Fewer than 3 good fits? The agent
     rewrites the query and searches again (corrective RAG).</div>
   <div class="arrow">→</div>
-  <div class="step"><b>4 · Analyse (RAG)</b>Fit score, gaps and a tailored resume bullet per job, grounded in and
-    cited to the job descriptions.</div>
+  <div class="step"><b>4 · Rate &amp; analyse (RAG)</b>One structured Gemini call reads your resume and the
+    retrieved jobs: a score out of 100, the top 3 fixes, and per-job gaps with a tailored bullet.</div>
 </div>
 """
 
@@ -66,7 +77,7 @@ def eval_tables() -> str:
 
 LEVELS = {"Entry": "junior", "Mid": "mid", "Senior": "senior"}
 STEPS = {"parse": "Read resume (VLM)", "retrieve": "Retrieved + reranked jobs", "grade": "Graded matches (LLM)",
-         "rewrite": "Rewrote search query (corrective RAG)", "analyze": "Wrote gap analysis (RAG)"}
+         "rewrite": "Rewrote search query (corrective RAG)", "analyze": "Rated resume + gap analysis (RAG)"}
 TIMEOUT_S = 150
 
 
@@ -98,12 +109,27 @@ def search(query, location, levels, company) -> str:
     return jobs_table(get_index().search(query, 10, **filters(location, levels, company)))
 
 
+CATEGORIES = {"skills_match": "Skills match to these jobs", "impact": "Impact & metrics",
+              "ml_depth": "ML / AI depth", "ats_format": "Format & ATS readiness"}
+
+
+def rating_html(r: dict) -> str:
+    color = "#16a34a" if r["overall"] >= 75 else "#d97706" if r["overall"] >= 55 else "#dc2626"
+    bars = "".join(
+        f'<div class="bar"><div class="lbl"><span>{label}</span><b>{r[k]["score"]}/25</b></div>'
+        f'<div class="track"><div class="fill" style="width:{r[k]["score"] * 4}%"></div></div>'
+        f'<div class="reason">{html.escape(r[k]["reason"])}</div></div>' for k, label in CATEGORIES.items())
+    fixes = "".join(f"<li>{html.escape(x)}</li>" for x in r["top_fixes"][:3])
+    return (f'<div class="rating"><div class="score" style="--c:{color}">{r["overall"]}<small>/ 100</small></div>'
+            f'<div class="bars">{bars}</div><div class="fixes"><b>Top 3 fixes</b><ol>{fixes}</ol></div></div>')
+
+
 def match(file, location, levels, company):
     """Streams each LangGraph step to the UI as it finishes."""
     if not file:
         raise gr.Error("Upload a resume first.")
-    start, log, profile, hits, report = time.time(), [], None, "", ""
-    yield "⏳ Reading your resume with the VLM…", profile, hits, report
+    start, log, profile, hits, report, rating = time.time(), [], None, "", "", ""
+    yield "⏳ Reading your resume with the VLM…", rating, hits, report, profile
     state = {"resume_path": file, "filters": filters(location, levels, company)}
     try:
         for update in match_graph.stream(state, {"configurable": {"thread_id": str(uuid.uuid4())}},
@@ -112,10 +138,10 @@ def match(file, location, levels, company):
             log.append(f"✓ {STEPS.get(node, node)} · {time.time() - start:.0f}s")
             profile = out.get("profile", profile)
             hits = jobs_table(out["hits"]) if "hits" in out else hits
-            if "report" in out:
-                report = out["report"]
+            if "rating" in out:
+                rating, report = rating_html(out["rating"]), "### Gap analysis\n" + out["report"]
             busy = "" if report else "\n\n⏳ Working…"
-            yield "\n\n".join(log) + busy, profile, hits, report
+            yield "\n\n".join(log) + busy, rating, hits, report, profile
             if not report and time.time() - start > TIMEOUT_S:
                 raise gr.Error(f"Stopped after {TIMEOUT_S}s: Gemini is responding slowly (free tier). "
                                "Your parsed resume is cached, so the next try is faster.")
@@ -158,9 +184,11 @@ with gr.Blocks(title="JobPilot") as demo:
             lvl = gr.CheckboxGroup(list(LEVELS), label="Seniority (none = all)")
             comp = gr.Dropdown(companies(), value="Any", label="Company")
         status = gr.Markdown()
+        rating = gr.HTML()
         hits = gr.Markdown()
-        with gr.Accordion("Your parsed profile and gap analysis", open=True):
-            profile, report = gr.JSON(label="Parsed profile (VLM)"), gr.Markdown()
+        report = gr.Markdown()
+        with gr.Accordion("Details: parsed profile (VLM output)", open=False):
+            profile = gr.JSON(show_label=False)
         gr.Markdown("## How it works")
         gr.HTML(PIPELINE)
         gr.Markdown("## Evaluation")
@@ -168,7 +196,7 @@ with gr.Blocks(title="JobPilot") as demo:
         gr.Markdown("Code: [github.com/rishav1708/joby](https://github.com/rishav1708/joby)")
 
         fs = [loc, lvl, comp]
-        go.click(match, [f] + fs, [status, profile, hits, report])
+        go.click(match, [f] + fs, [status, rating, hits, report, profile])
         sbtn.click(search, [q] + fs, hits)
         q.submit(search, [q] + fs, hits)
         demo.load(lambda: (index_stats(), eval_tables()), None, [stats, evals])

@@ -64,13 +64,18 @@ class FakeLLM:
         if isinstance(prompt, str) and prompt.startswith("Candidate:") and "Jobs:" in prompt:
             FakeLLM.calls += 1
             return graph.Grades(relevant_ids=[] if FakeLLM.calls == 1 else ["a", "b", "c"])
+        if isinstance(prompt, list):  # analyze: multimodal structured rating
+            sc = graph.Score(score=10, reason="ok")
+            return graph.Rating(skills_match=sc, impact=sc, ml_depth=sc, ats_format=sc, top_fixes=["a", "b", "c"],
+                                jobs=[graph.JobFit(job_id="a", fit=7, meets=["pytorch"], gaps=["k8s"],
+                                                   tailored_bullet="Built X")], skills_to_learn=["k8s"])
         return type("Msg", (), {"text": "ml engineer pytorch"})()
 
 
 def test_match_graph_rewrites_then_analyzes(monkeypatch, tmp_path):
     ix = fake_index()
     resume = tmp_path / "r.pdf"
-    resume.write_bytes(uuid.uuid4().bytes)  # unique bytes, so the profile cache misses
+    resume.write_bytes(b"%PDF" + uuid.uuid4().bytes)  # unique bytes, so the profile cache misses
     monkeypatch.setattr(graph, "PROFILE_CACHE", tmp_path / "profiles")
     monkeypatch.setattr(graph, "get_index", lambda: ix)
     monkeypatch.setattr(graph, "llm", FakeLLM)
@@ -80,6 +85,7 @@ def test_match_graph_rewrites_then_analyzes(monkeypatch, tmp_path):
     assert out["attempts"] == 1 and out["query"] == "ml engineer pytorch"
     assert len(out["relevant"]) == 3 and len(out["contexts"]) == 3
     assert len(list((tmp_path / "profiles").iterdir())) == 1  # profile cached for next time
+    assert out["rating"]["overall"] == 40 and "fit 7/10 [a]" in out["report"]
 
 
 def test_build_resumes_and_skips_cached(tmp_path, monkeypatch):

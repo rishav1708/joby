@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 from typing import Annotated, TypedDict
 
-from langchain_core.messages import AnyMessage, SystemMessage
+from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
 from langchain_core.tools import tool
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph, add_messages
@@ -41,6 +41,7 @@ class MatchState(TypedDict, total=False):
     hits: list[dict]
     relevant: list[dict]
     contexts: list[str]
+    rating: dict
     report: str
 
 
@@ -90,16 +91,59 @@ def rewrite(s: MatchState) -> MatchState:
     return {"query": q.strip(), "attempts": s["attempts"] + 1}
 
 
+class Score(BaseModel):
+    score: int = Field(ge=0, le=25)
+    reason: str = Field(description="one short sentence")
+
+
+class JobFit(BaseModel):
+    job_id: str
+    fit: int = Field(ge=0, le=10)
+    meets: list[str] = Field(description="requirements from this job the resume already shows")
+    gaps: list[str] = Field(description="requirements from this job the resume lacks")
+    tailored_bullet: str = Field(description="one resume bullet rewritten for this job, using only real experience")
+
+
+class Rating(BaseModel):
+    skills_match: Score = Field(description="how well the resume's skills match the JOBS below")
+    impact: Score = Field(description="quantified results and metrics in bullets")
+    ml_depth: Score = Field(description="depth of ML/AI work: models, RAG, agents, evals, deployment")
+    ats_format: Score = Field(description="layout, section order, keywords, length, ATS parseability")
+    top_fixes: list[str] = Field(description="the 3 highest-impact concrete edits, most important first")
+    jobs: list[JobFit]
+    skills_to_learn: list[str] = Field(description="top 3 skills to learn, based on the gaps across the jobs")
+
+    @property
+    def overall(self) -> int:
+        return self.skills_match.score + self.impact.score + self.ml_depth.score + self.ats_format.score
+
+
+def render(r: Rating, jobs: list[dict]) -> str:
+    """Markdown gap analysis from the structured rating (also what RAGAS scores)."""
+    by_id = {j["id"]: j for j in jobs}
+    out = []
+    for f in r.jobs:
+        j = by_id.get(f.job_id, {"title": f.job_id, "company": "", "url": ""})
+        out += [f"#### [{j['title']}]({j.get('url', '')}) · {j['company']} · fit {f.fit}/10 [{f.job_id}]",
+                f"**Meets:** {', '.join(f.meets) or '-'}  ", f"**Gaps:** {', '.join(f.gaps) or '-'}  ",
+                f"**Tailored bullet:** {f.tailored_bullet}", ""]
+    out.append(f"**Top skills to learn:** {', '.join(r.skills_to_learn)}")
+    return "\n".join(out)
+
+
 def analyze(s: MatchState) -> MatchState:
+    """One structured multimodal call: the model sees the resume itself (for format/impact) plus the
+    retrieved job descriptions (RAG), and returns the rating and per-job gap analysis together."""
     jobs = (s["relevant"] or s["hits"])[:ANALYZE_JOBS]
     contexts = [f"[{j['id']}] {j['title']} at {j['company']} ({j['location']})\n{j['text'][:1500]}" for j in jobs]
-    context = "\n\n".join(contexts)
-    report = llm().invoke(
-        "You are a career coach. Using ONLY the job descriptions below, for each job give: a fit score 0-10, "
-        "the requirements the candidate already meets, the gaps, and one resume bullet they could tailor. "
-        "Cite the job id in brackets for every claim. Then list the top 3 skills to learn across all jobs.\n\n"
-        f"CANDIDATE:\n{s['profile']}\n\nJOBS:\n{context}").text
-    return {"report": report, "contexts": contexts}
+    prompt = ("You are a strict technical recruiter for AI/ML roles. Rate the attached resume against ONLY the "
+              "job descriptions below. Each category is out of 25; be calibrated (a typical student resume scores "
+              "40-65 overall). Ground every gap and requirement in the jobs and use their ids.\n\n"
+              "JOBS:\n" + "\n\n".join(contexts))
+    msg = HumanMessage(content=[{"type": "text", "text": prompt}, vlm.file_block(Path(s["resume_path"]))])
+    r = llm().with_structured_output(Rating).invoke([msg])
+    rating = {**r.model_dump(), "overall": r.overall}
+    return {"rating": rating, "report": render(r, jobs), "contexts": contexts}
 
 
 g = StateGraph(MatchState)
