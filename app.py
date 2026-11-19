@@ -4,6 +4,8 @@
 """
 import html
 import json
+import queue
+import threading
 import time
 import uuid
 
@@ -27,6 +29,22 @@ CSS = """
 .fill {height: 8px; border-radius: 4px; background: var(--color-accent)}
 .reason {font-size: .85rem; opacity: .75}
 .fixes {flex: 1 1 260px} .fixes ol {margin: .3rem 0 0 1.1rem}
+.wait {padding: 1rem; border: 1px solid var(--border-color-primary); border-radius: 12px;
+       background: var(--background-fill-secondary)}
+.wait .head {font-size: 1.1rem; margin-bottom: .5rem} .clock {font-size: 1.8rem; font-weight: 700;
+       font-variant-numeric: tabular-nums; color: var(--color-accent); margin-right: .3rem}
+.pbar {height: 10px; border-radius: 5px; background: var(--border-color-primary); overflow: hidden}
+.pbar div {height: 100%; border-radius: 5px; transition: width 1s linear;
+           background-color: #6366f1;
+           background-image: linear-gradient(90deg, #6366f1, #a855f7, #6366f1); background-size: 200% 100%; animation: flow 2s linear infinite}
+@keyframes flow {to {background-position: -200% 0}}
+.steps {display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .8rem}
+.st {flex: 1 1 140px; display: flex; align-items: center; gap: .4rem; padding: .5rem .6rem; border-radius: 8px;
+     opacity: .5; border: 1px solid var(--border-color-primary)}
+.st small {margin-left: auto; opacity: .7} .st.done {opacity: 1} .st.done .ic {color: #16a34a; font-weight: 700}
+.st.on {opacity: 1; border-color: var(--color-accent); animation: pulse 1.2s ease-in-out infinite}
+@keyframes pulse {50% {box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-accent) 25%, transparent)}}
+.tip {margin-top: .7rem; font-size: .95rem; opacity: .85}
 """
 
 def index_stats() -> str:
@@ -54,8 +72,6 @@ def eval_tables() -> str:
 
 
 LEVELS = {"Entry": "junior", "Mid": "mid", "Senior": "senior"}
-STEPS = {"parse": "Read resume (VLM)", "retrieve": "Retrieved + reranked jobs", "grade": "Graded matches (LLM)",
-         "rewrite": "Rewrote search query (corrective RAG)", "analyze": "Rated resume + gap analysis (RAG)"}
 TIMEOUT_S = 150
 
 
@@ -81,10 +97,25 @@ def jobs_table(jobs: list[dict]) -> str:
     return "\n".join(rows)
 
 
+def describe(location, levels, company) -> str:
+    parts = [p for p in [location if location != "Any" else "", ", ".join(levels),
+                         company if company not in (None, "Any") else ""] if p]
+    return "Filters: " + " · ".join(parts) if parts else "Filters: none"
+
+
+def refilter(last, query, location, levels, company) -> str:
+    """Filters are live: re-run retrieval (no LLM calls) for the last resume match, else the search box."""
+    if last:
+        jobs = get_index().search(last["query"], 10, junior=last["junior"], **filters(location, levels, company))
+        return f"_{describe(location, levels, company)} (re-ranked without re-running the agent)_\n\n" + jobs_table(jobs)
+    return search(query, location, levels, company)
+
+
 def search(query, location, levels, company) -> str:
     if not query.strip():
         return ""
-    return jobs_table(get_index().search(query, 10, **filters(location, levels, company)))
+    return (f"_{describe(location, levels, company)}_\n\n"
+            + jobs_table(get_index().search(query, 10, **filters(location, levels, company))))
 
 
 CATEGORIES = {"skills_match": "Skills match to these jobs", "impact": "Impact & metrics",
@@ -102,37 +133,93 @@ def rating_html(r: dict) -> str:
             f'<div class="bars">{bars}</div><div class="fixes"><b>Top 3 fixes</b><ol>{fixes}</ol></div></div>')
 
 
+STAGES = [("parse", "Reading your resume", "📄"), ("retrieve", "Searching live jobs", "🔎"),
+          ("grade", "Grading matches", "⚖️"), ("analyze", "Rating your resume", "⭐")]
+TIPS = [
+    "Start every bullet with a strong verb: built, shipped, cut, scaled.",
+    "Numbers get read first. '2x faster' beats 'improved performance'.",
+    "Recruiters skim a resume in about 7 seconds. Put your best project on top.",
+    "Mirror the job's keywords. ATS filters match exact terms like 'PyTorch' or 'RAG'.",
+    "Interview tip: tell project stories as problem, what you did, result.",
+    "One page is plenty for a student. Cut anything that doesn't sell you.",
+    "Link a live demo. A working URL beats three paragraphs of description.",
+    "Interview tip: know the eval numbers on your resume and how you measured them.",
+    "Fun fact: the agent may rewrite its own search query if the first results are weak.",
+    "Tailor the top 3 bullets for each job. That alone lifts response rates.",
+]
+
+
+def wait_html(done: dict[str, float], elapsed: float, rewrites: int, finished: bool = False) -> str:
+    """Live stepper: elapsed counter, progress bar, step states, rotating tip."""
+    current = next((k for k, *_ in STAGES if k not in done), None)
+    pct = 100 if finished else min(97, (len(done) + min(1.0, elapsed / 60) * 0.6) / len(STAGES) * 100)
+    steps = "".join(
+        f'<div class="st {"done" if k in done else "on" if k == current else ""}">'
+        f'<span class="ic">{"✓" if k in done else icon}</span>{label}'
+        f'<small>{f"{done[k]:.0f}s" if k in done else "…" if k == current else ""}</small></div>'
+        for k, label, icon in STAGES)
+    note = f'<div class="tip">🔁 The agent rewrote its search {rewrites}× to find better fits.</div>' if rewrites else ""
+    tip = "" if finished else f'<div class="tip">💡 {TIPS[int(elapsed // 5) % len(TIPS)]}</div>'
+    head = f"✅ Done in {elapsed:.0f}s" if finished else f'<span class="clock">{elapsed:.0f}s</span> working on it'
+    return (f'<div class="wait"><div class="head">{head}</div><div class="pbar"><div style="width:{pct:.0f}%">'
+            f'</div></div><div class="steps">{steps}</div>{note}{tip}</div>')
+
+
 def match(file, location, levels, company):
-    """Streams each LangGraph step to the UI as it finishes."""
+    """Runs the LangGraph pipeline in a thread and ticks the wait screen every second."""
     if not file:
         raise gr.Error("Upload a resume first.")
-    start, log, profile, hits, report, rating = time.time(), [], None, "", "", ""
-    yield "⏳ Reading your resume with the VLM…", rating, hits, report, profile
+    start, done, rewrites = time.time(), {}, 0
+    profile, hits, report, rating, last = None, "", "", "", None
     state = {"resume_path": file, "filters": filters(location, levels, company)}
-    try:
-        for update in match_graph.stream(state, {"configurable": {"thread_id": str(uuid.uuid4())}},
-                                         stream_mode="updates"):
-            node, out = next(iter(update.items()))
-            log.append(f"✓ {STEPS.get(node, node)} · {time.time() - start:.0f}s")
-            profile = out.get("profile", profile)
-            hits = jobs_table(out["hits"]) if "hits" in out else hits
-            if "rating" in out:
-                rating, report = rating_html(out["rating"]), "### Gap analysis\n" + out["report"]
-            busy = "" if report else "\n\n⏳ Working…"
-            yield "\n\n".join(log) + busy, rating, hits, report, profile
-            if not report and time.time() - start > TIMEOUT_S:
+    events: queue.Queue = queue.Queue()
+
+    def run():
+        try:
+            for update in match_graph.stream(state, {"configurable": {"thread_id": str(uuid.uuid4())}},
+                                             stream_mode="updates"):
+                events.put(("update", update))
+            events.put(("done", None))
+        except Exception as e:  # surfaced to the UI below
+            events.put(("error", e))
+
+    threading.Thread(target=run, daemon=True).start()  # ponytail: can't cancel a running thread on timeout
+    while True:
+        elapsed = time.time() - start
+        try:
+            kind, val = events.get(timeout=1)
+        except queue.Empty:
+            if elapsed > TIMEOUT_S:
                 raise gr.Error(f"Stopped after {TIMEOUT_S}s: Gemini is responding slowly (free tier). "
                                "Your parsed resume is cached, so the next try is faster.")
-    except gr.Error:
-        raise
-    except Exception as e:
-        if "503" in str(e) or "UNAVAILABLE" in str(e):
-            raise gr.Error("Gemini is overloaded right now (both the main and backup models). "
-                           "This is usually temporary, so please try again in a minute or two.")
-        if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
-            raise gr.Error("Gemini free-tier rate limit reached. Wait about a minute and try again "
-                           "(your parsed resume is cached).")
-        raise gr.Error(f"Something failed: {str(e)[:300]}")
+            yield wait_html(done, elapsed, rewrites), rating, hits, report, profile, last
+            continue
+        if kind == "error":
+            e = str(val)
+            if "503" in e or "UNAVAILABLE" in e:
+                raise gr.Error("Gemini is overloaded right now (both the main and backup models). "
+                               "This is usually temporary, so please try again in a minute or two.")
+            if "429" in e or "RESOURCE_EXHAUSTED" in e:
+                raise gr.Error("Gemini free-tier rate limit reached. Wait about a minute and try again "
+                               "(your parsed resume is cached).")
+            raise gr.Error(f"Something failed: {e[:300]}")
+        if kind == "done":
+            yield (wait_html(done, elapsed, rewrites, finished=True) + f"<small>{describe(location, levels, company)}"
+                   "</small>", rating, hits, report, profile, last)
+            return
+        node, out = next(iter(val.items()))
+        if node == "rewrite":
+            rewrites += 1
+            done.pop("retrieve", None), done.pop("grade", None)  # the stepper goes back to searching
+        else:
+            done[node] = elapsed
+        profile = out.get("profile", profile)
+        if "query" in out:
+            last = {"query": out["query"], "junior": profile["years_experience"] < 2 or None}
+        hits = jobs_table(out["hits"]) if "hits" in out else hits
+        if "rating" in out:
+            rating, report = rating_html(out["rating"]), "### Gap analysis\n" + out["report"]
+        yield wait_html(done, elapsed, rewrites), rating, hits, report, profile, last
 
 
 def chat(message, history, user_id):
@@ -161,7 +248,8 @@ with gr.Blocks(title="JobPilot") as demo:
             loc = gr.Radio(["Any", "India", "Remote"], value="Any", label="Location")
             lvl = gr.CheckboxGroup(list(LEVELS), label="Seniority (none = all)")
             comp = gr.Dropdown(companies(), value="Any", label="Company")
-        status = gr.Markdown()
+        status = gr.HTML()
+        last = gr.State(None)  # last resume run's query, so filter changes re-rank it live
         rating = gr.HTML()
         hits = gr.Markdown()
         report = gr.Markdown()
@@ -172,9 +260,11 @@ with gr.Blocks(title="JobPilot") as demo:
         gr.Markdown("Code: [github.com/rishav1708/joby](https://github.com/rishav1708/joby)")
 
         fs = [loc, lvl, comp]
-        go.click(match, [f] + fs, [status, rating, hits, report, profile])
-        sbtn.click(search, [q] + fs, hits)
-        q.submit(search, [q] + fs, hits)
+        go.click(match, [f] + fs, [status, rating, hits, report, profile, last])
+        sbtn.click(lambda *a: (None, search(*a)), [q] + fs, [last, hits])
+        q.submit(lambda *a: (None, search(*a)), [q] + fs, [last, hits])
+        for c in fs:
+            c.change(refilter, [last, q] + fs, hits)
         demo.load(lambda: (index_stats(), eval_tables()), None, [stats, evals])
 
     with gr.Tab("Chat with the agent"):

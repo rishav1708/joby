@@ -181,3 +181,33 @@ def test_llm_falls_back_on_overload(monkeypatch):
 
     monkeypatch.setattr(llm_mod, "_gemini", fake)
     assert llm_mod.llm().invoke("hi").content == "backup"
+
+
+def test_match_graph_applies_filters_on_every_retrieve(monkeypatch, tmp_path):
+    from jobpilot.retrieve import matches
+    jobs = [{"id": f"gh-{i}", "title": t, "company": c, "location": loc, "url": "", "text": "pytorch ml engineer"}
+            for i, (t, c, loc) in enumerate([
+                ("ML Engineer Intern", "a", "Bengaluru, India"), ("Senior ML Engineer", "b", "Bengaluru, India"),
+                ("ML Engineer, New Grad", "c", "London, UK"), ("ML Engineer Intern", "d", "Pune, India"),
+                ("Staff ML Engineer", "e", "Remote - USA")])]
+    emb = DeterministicFakeEmbedding(size=16)
+    ix = Index(jobs, np.array(emb.embed_documents([j["text"] for j in jobs])), emb)
+    ix.rerank = lambda q, ids, k=10: ids[:k]
+    seen = []
+    real_search = ix.search
+    ix.search = lambda *a, **k: seen.append(real_search(*a, **k)) or seen[-1]
+    FakeLLM.calls = 0  # first grade rejects everything -> rewrite -> second retrieve
+    monkeypatch.setattr(graph, "get_index", lambda: ix)
+    monkeypatch.setattr(graph, "llm", FakeLLM)
+    monkeypatch.setattr(graph, "PROFILE_CACHE", tmp_path / "profiles")
+    monkeypatch.setattr(graph.vlm, "read", lambda path, schema: graph.vlm.Profile(
+        headline="student", skills=["pytorch"], years_experience=0, target_roles=["ML Engineer"]))
+    resume = tmp_path / "r.pdf"
+    resume.write_bytes(b"%PDF" + uuid.uuid4().bytes)
+    filters = {"location": "India", "levels": ["junior"], "company": None}
+    out = graph.match_graph.invoke({"resume_path": str(resume), "filters": filters},
+                                   {"configurable": {"thread_id": str(uuid.uuid4())}})
+    assert out["attempts"] == 1 and len(seen) == 2  # retrieved before and after the rewrite
+    for hits in seen:
+        assert {j["id"] for j in hits} == {"gh-0", "gh-3"}
+        assert all(matches(j, **filters) for j in hits)
