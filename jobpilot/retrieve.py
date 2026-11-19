@@ -14,7 +14,7 @@ import numpy as np
 from rank_bm25 import BM25Okapi
 
 from .ingest import JOBS_PATH, normalize
-from .llm import EMBED_MODEL, embedder
+from .llm import EMBED_KEY, embedder
 
 VEC_PATH = Path("data/vectors.npz")
 RERANKER = "cross-encoder/ms-marco-MiniLM-L-6-v2"
@@ -96,18 +96,19 @@ class Index:
         Saves after every chunk, so an interrupted run resumes where it stopped."""
         jobs = [normalize(json.loads(line)) for line in JOBS_PATH.open() if line.strip()]
         old = dict(np.load(VEC_PATH)) if VEC_PATH.exists() else {}
-        same_model = str(old.get("model", "")) == EMBED_MODEL
+        same_model = str(old.get("model", "")) == EMBED_KEY
         cached = dict(zip(old["ids"], old["vecs"])) if same_model else {}
         new = [j for j in jobs if j["id"] not in cached]
+        print(f"{len(jobs)} jobs, {len(new)} need embedding", flush=True)
         emb = embedder()
         for i in range(0, len(new), chunk):
             batch = new[i:i + chunk]
             cached.update(zip([j["id"] for j in batch], emb.embed_documents([doc_text(j) for j in batch])))
             np.savez(VEC_PATH, ids=np.array(list(cached)), vecs=np.array(list(cached.values()), dtype="float32"),
-                     model=EMBED_MODEL)
-            print(f"embedded {min(i + chunk, len(new))}/{len(new)} new jobs")
+                     model=EMBED_KEY)
+            print(f"embedded {min(i + chunk, len(new))}/{len(new)} new jobs", flush=True)
         vecs = np.array([cached[j["id"]] for j in jobs], dtype="float32")
-        np.savez(VEC_PATH, ids=np.array([j["id"] for j in jobs]), vecs=vecs, model=EMBED_MODEL)  # drop expired jobs
+        np.savez(VEC_PATH, ids=np.array([j["id"] for j in jobs]), vecs=vecs, model=EMBED_KEY)  # drop expired jobs
         return cls(jobs, vecs, emb)
 
     def bm25_search(self, query: str, k: int = 50) -> list[str]:

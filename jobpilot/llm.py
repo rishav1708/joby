@@ -9,6 +9,8 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 LLM_MODEL = os.getenv("JOBPILOT_LLM", "gemini-3.5-flash")
 FALLBACK_MODEL = os.getenv("JOBPILOT_LLM_FALLBACK", "gemini-3.5-flash-lite")  # "" disables
 EMBED_MODEL = os.getenv("JOBPILOT_EMBED", "BAAI/bge-small-en-v1.5")
+EMBED_MAX_TOKENS = 256  # job title + first paragraphs carry the signal; 512 is ~2-3x slower on CPU
+EMBED_KEY = f"{EMBED_MODEL}@{EMBED_MAX_TOKENS}"  # stored with cached vectors; a change re-embeds
 QUERY_PREFIX = "Represent this sentence for searching relevant passages: "  # bge retrieval instruction
 
 
@@ -34,6 +36,7 @@ class LocalEmbeddings(Embeddings):
     def __init__(self, model: str = EMBED_MODEL):
         from sentence_transformers import SentenceTransformer  # lazy: pulls in torch
         self.model = SentenceTransformer(model)
+        self.model.max_seq_length = EMBED_MAX_TOKENS
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         return self.model.encode(texts, batch_size=64, normalize_embeddings=True).tolist()
