@@ -101,3 +101,28 @@ def test_build_resumes_and_skips_cached(tmp_path, monkeypatch):
     assert calls == [2, 1]  # saved in chunks
     retrieve.Index.build(chunk=2)
     assert calls == [2, 1]  # second build embeds nothing new
+
+
+def test_seniority():
+    from jobpilot.retrieve import seniority
+    assert seniority("Machine Learning Engineer, New Grad") == "junior"
+    assert seniority("ML Intern (Summer 2027)") == "junior"
+    assert seniority("Staff ML Engineer") == "senior"
+    assert seniority("Tech Lead, Inference") == "senior"
+    assert seniority("Machine Learning Engineer") == "mid"
+
+
+def test_junior_query_ranks_entry_level_first():
+    jobs = [
+        {"id": "s1", "title": "Senior ML Engineer", "company": "x", "location": "", "text": "pytorch ml engineer"},
+        {"id": "s2", "title": "Staff ML Engineer", "company": "x", "location": "", "text": "pytorch ml engineer"},
+        {"id": "m1", "title": "ML Engineer", "company": "x", "location": "", "text": "pytorch ml engineer"},
+        {"id": "j1", "title": "ML Engineer, New Grad", "company": "x", "location": "", "text": "pytorch"},
+    ]
+    emb = DeterministicFakeEmbedding(size=16)
+    ix = Index(jobs, np.array(emb.embed_documents([j["text"] for j in jobs])), emb)
+    order = ["s1", "s2", "m1", "j1"]  # reranker prefers senior roles, as on the real index
+    ix.rerank = lambda q, ids, k=10: [d for d in order if d in ids][:k]
+    junior = [j["id"] for j in ix.search("junior ML engineer pytorch", 4)]
+    assert junior[0] == "j1" and junior[-2:] == ["s1", "s2"]
+    assert [j["id"] for j in ix.search("ML engineer pytorch", 4)] == order  # no boost without junior intent

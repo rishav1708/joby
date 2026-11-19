@@ -17,6 +17,19 @@ from .llm import EMBED_MODEL, embedder
 
 VEC_PATH = Path("data/vectors.npz")
 RERANKER = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+JUNIOR = re.compile(r"\b(intern(ship)?|junior|jr|new[- ]grad(uate)?|graduate|entry[- ]level|early[- ]career|"
+                    r"apprentice|trainee|fresher|student)\b", re.I)
+SENIOR = re.compile(r"\b(senior|sr|staff|principal|lead|head|director|manager|architect|vp|distinguished)\b", re.I)
+SHIFT = {"junior": -5, "mid": 0, "senior": 10}  # rank positions moved after rerank; tune on the eval set
+
+
+def seniority(title: str) -> str:
+    return "junior" if JUNIOR.search(title) else "senior" if SENIOR.search(title) else "mid"
+
+
+def seniority_boost(ids: list[str], titles: dict[str, str]) -> list[str]:
+    """Soft re-sort for entry-level searches: junior roles move up, senior/staff/lead roles move down."""
+    return [d for _, d in sorted((i + SHIFT[seniority(titles[d])], d) for i, d in enumerate(ids))]
 
 
 def tokenize(text: str) -> list[str]:
@@ -84,8 +97,14 @@ class Index:
         scores = reranker().predict([(query, doc_text(self.jobs[i])) for i in ids])
         return [ids[i] for i in np.argsort(-scores)[:k]]
 
-    def search(self, query: str, k: int = 10) -> list[dict]:
-        return [self.jobs[i] for i in self.rerank(query, self.hybrid_search(query, 30), k)]
+    def search(self, query: str, k: int = 10, junior: bool | None = None) -> list[dict]:
+        """junior=None infers entry-level intent from the query ("intern", "new grad", "junior", ...)."""
+        if junior is None:
+            junior = bool(JUNIOR.search(query))
+        if not junior:
+            return [self.jobs[i] for i in self.rerank(query, self.hybrid_search(query, 30), k)]
+        ids = self.rerank(query, self.hybrid_search(query, 60), 60)  # wider pool: senior roles dominate the index
+        return [self.jobs[i] for i in seniority_boost(ids, {i: self.jobs[i]["title"] for i in ids})[:k]]
 
 
 @cache

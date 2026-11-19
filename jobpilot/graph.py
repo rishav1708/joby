@@ -50,7 +50,8 @@ def parse(s: MatchState) -> MatchState:
 
 
 def retrieve(s: MatchState) -> MatchState:
-    return {"hits": get_index().search(s["query"], k=10)}
+    junior = s["profile"]["years_experience"] < 2 or None  # students/new grads get entry-level ranking
+    return {"hits": get_index().search(s["query"], k=10, junior=junior)}
 
 
 def grade(s: MatchState) -> MatchState:

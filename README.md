@@ -23,7 +23,7 @@ chat agent: Gemini + tools (search_jobs, get_job), memory via LangGraph SQLite c
 | Path | What it does |
 |---|---|
 | `jobpilot/ingest.py` | Pulls live postings from Greenhouse, Lever and Remotive public APIs. Runs daily in CI. |
-| `jobpilot/retrieve.py` | BM25 + local bge-small embeddings in FAISS, fused with reciprocal rank fusion, reranked by a cross-encoder. Only new postings get embedded. |
+| `jobpilot/retrieve.py` | BM25 + local bge-small embeddings in FAISS, fused with reciprocal rank fusion, reranked by a cross-encoder, then a seniority-aware boost for entry-level searches. Only new postings get embedded. |
 | `jobpilot/vlm.py` | Gemini vision reads resumes and job-post screenshots into Pydantic schemas. Also a text-layer/OCR baseline for comparison. |
 | `jobpilot/graph.py` | Two LangGraph graphs: the corrective-RAG match pipeline and a tool-calling chat agent with persistent memory. |
 | `evals/retrieval.py` | Recall@10, nDCG@10, MRR for BM25 vs dense vs hybrid vs hybrid+rerank. Labels by LLM pooling, then hand-checked. |
@@ -59,6 +59,7 @@ _Fill in after running the evals._
 | Dense (bge-small + FAISS) | | | |
 | Hybrid (RRF) | | | |
 | Hybrid + rerank | | | |
+| + seniority boost | | | |
 
 | Extraction (n docs) | Skill F1 |
 |---|---|

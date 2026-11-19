@@ -25,6 +25,7 @@ def methods(ix):
         "dense": lambda q: ix.dense_search(q, K),
         "hybrid_rrf": lambda q: ix.hybrid_search(q, K),
         "hybrid_rrf+rerank": lambda q: ix.rerank(q, ix.hybrid_search(q, 30), K),
+        "+seniority_boost": lambda q: [j["id"] for j in ix.search(q, K)],
     }
 
 
