@@ -29,7 +29,7 @@ chat agent: Gemini + tools (search_jobs, get_job), memory via LangGraph SQLite c
 | `evals/retrieval.py` | Recall@10, nDCG@10, MRR for BM25 vs dense vs hybrid vs hybrid+rerank. Labels by LLM pooling, then hand-checked. |
 | `evals/vlm.py` | Skill-extraction F1: VLM vs pypdf/OCR + LLM baseline on hand-labelled docs. |
 | `evals/rag.py` | RAGAS Faithfulness and Response Relevancy for the gap-analysis reports. |
-| `app.py` | Gradio demo (deployable to Hugging Face Spaces). |
+| `app.py` | Gradio demo (deploys free to Render). |
 
 ## Run it
 
@@ -49,15 +49,16 @@ Offline tests (no key needed, run inside the venv): `GOOGLE_API_KEY=x python -m 
 
 Models default to `gemini-3.5-flash` (chat + vision) and local `BAAI/bge-small-en-v1.5` embeddings (no API quota); override with `JOBPILOT_LLM` / `JOBPILOT_EMBED`. If Gemini is overloaded (503) or out of quota (429), calls fall back to `gemini-3.5-flash-lite` (`JOBPILOT_LLM_FALLBACK`, empty to disable).
 
-## Deploy (Hugging Face Spaces, free)
+## Deploy (Render, free)
 
-The GitHub Action tests every push, then (once configured) fetches fresh jobs, embeds the new ones and
-pushes the app plus the index to a Space in one commit. It also runs daily at 07:00 IST.
+The GitHub Action tests every push, refreshes the jobs, embeds only the new ones and publishes the index
+as the `data` release. It also runs daily at 07:00 IST. Models run on ONNX (fastembed, no torch), so the
+app fits Render's free 512MB instance.
 
-1. Create a Hugging Face **write** token and save it as the GitHub repo secret `HF_TOKEN`.
-2. Add the GitHub repo variable `HF_SPACE`, e.g. `yourname/jobpilot` (the Space is created on first deploy).
-3. Run the `ci` workflow once from the Actions tab.
-4. In the Space's Settings → Variables and secrets, add the secret `GOOGLE_API_KEY`.
+1. On render.com, sign in with GitHub, then New → Blueprint and pick this repo (it reads `render.yaml`).
+2. When asked, paste a Gemini key from aistudio.google.com as `GOOGLE_API_KEY`.
+
+The free instance sleeps after 15 idle minutes; the first visit after that takes about a minute.
 
 ## Results
 

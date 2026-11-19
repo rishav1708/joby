@@ -5,6 +5,7 @@ Set GOOGLE_API_KEY first.
 """
 import html
 import json
+import os
 import queue
 import threading
 import time
@@ -378,7 +379,12 @@ with gr.Blocks(title="JobPilot") as demo:
     demo.load(lambda: (header(), eval_tables()), None, [top, evals])
 
 if __name__ == "__main__":
-    if not JOBS_PATH.exists():  # fresh machine or Space without a prebuilt index
+    if not JOBS_PATH.exists() and os.getenv("JOBPILOT_DATA_URL"):  # hosted: CI's prebuilt index
+        import urllib.request
+        JOBS_PATH.parent.mkdir(exist_ok=True)
+        for name in ("vectors.npz", "jobs.jsonl"):  # jobs last: its presence means the download finished
+            urllib.request.urlretrieve(f"{os.environ['JOBPILOT_DATA_URL']}/{name}", JOBS_PATH.parent / name)
+    if not JOBS_PATH.exists():  # fresh machine
         from jobpilot import ingest
         ingest.main()
     print("Loading the job index (new jobs get embedded now, so searches are instant later)...")

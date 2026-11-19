@@ -1,11 +1,11 @@
-# Runtime (also what the Hugging Face Space installs; the Space provides gradio itself)
+# Runtime (app.py also needs gradio; Render installs it from render.yaml)
 langchain-core>=1.0
 langchain-google-genai>=4.0
 langgraph>=1.0
 langgraph-checkpoint-sqlite>=3.0
 faiss-cpu
 rank-bm25
-sentence-transformers
+fastembed
 numpy
 pydantic>=2
 pypdf

@@ -1,0 +1,20 @@
+# Render free web service (512MB). Render dashboard -> New -> Blueprint -> this repo, then set GOOGLE_API_KEY.
+services:
+  - type: web
+    name: jobpilot
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt gradio
+    startCommand: python app.py
+    healthCheckPath: /
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.8"
+      - key: GRADIO_SERVER_NAME
+        value: 0.0.0.0
+      - key: GRADIO_SERVER_PORT
+        value: "10000"
+      - key: JOBPILOT_DATA_URL
+        value: https://github.com/rishav1708/joby/releases/download/data
+      - key: GOOGLE_API_KEY
+        sync: false

@@ -17,7 +17,7 @@ from .ingest import JOBS_PATH, normalize
 from .llm import EMBED_KEY, embedder
 
 VEC_PATH = Path("data/vectors.npz")
-RERANKER = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+RERANKER = "Xenova/ms-marco-MiniLM-L-6-v2"  # ONNX export of cross-encoder/ms-marco-MiniLM-L-6-v2
 JUNIOR = re.compile(r"\b(intern(ship)?|junior|jr|new[- ]grad(uate)?|graduate|entry[- ]level|early[- ]career|"
                     r"apprentice|trainee|fresher|student)\b", re.I)
 SENIOR = re.compile(r"\b(senior|sr|staff|principal|lead|head|director|manager|architect|vp|distinguished|"
@@ -125,7 +125,7 @@ class Index:
         return rrf([self.bm25_search(query, k), self.dense_search(query, k)])[:k]
 
     def rerank(self, query: str, ids: list[str], k: int = 10) -> list[str]:
-        scores = reranker().predict([(query, doc_text(self.jobs[i])) for i in ids])
+        scores = np.array(list(reranker().rerank(query, [doc_text(self.jobs[i]) for i in ids])))
         return [ids[i] for i in np.argsort(-scores)[:k]]
 
     def search(self, query: str, k: int = 10, junior: bool | None = None, location: str = "Any",
@@ -147,8 +147,8 @@ class Index:
 
 @cache
 def reranker():
-    from sentence_transformers import CrossEncoder  # lazy: pulls in torch
-    return CrossEncoder(RERANKER)
+    from fastembed.rerank.cross_encoder import TextCrossEncoder
+    return TextCrossEncoder(RERANKER)
 
 
 _lock = threading.Lock()

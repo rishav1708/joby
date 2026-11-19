@@ -4,4 +4,3 @@ gradio
 ragas
 pytesseract
 pytest
-huggingface_hub
