@@ -232,3 +232,21 @@ def test_ingest_skips_dead_boards_and_reads_ashby(tmp_path, monkeypatch, capsys)
     out = capsys.readouterr().out
     assert "wrote 1 jobs from 1 companies" in out and "greenhouse:gone" in out and "remotive" in out
     assert '"company": "openai"' in (tmp_path / "jobs.jsonl").read_text()
+
+
+def test_messy_job_records_still_search(tmp_path, monkeypatch):
+    import json
+    from jobpilot import retrieve
+    raw = [{"id": 1, "title": "ML Engineer Intern", "company": "x", "location": None, "url": None, "text": "pytorch"},
+           {"id": "2", "title": "Data Engineer", "company": "y", "location": {"name": "Pune, India"}, "text": "spark"},
+           {"id": "3", "title": "ML Engineer", "company": "z", "text": "pytorch ml"}]  # location missing
+    (tmp_path / "jobs.jsonl").write_text("".join(json.dumps(j) + "\n" for j in raw) + "\n")
+    monkeypatch.setattr(retrieve, "JOBS_PATH", tmp_path / "jobs.jsonl")
+    monkeypatch.setattr(retrieve, "VEC_PATH", tmp_path / "vectors.npz")
+    monkeypatch.setattr(retrieve, "embedder", lambda: DeterministicFakeEmbedding(size=16))
+    ix = retrieve.Index.build()
+    ix.rerank = lambda q, ids, k=10: ids[:k]
+    for loc in ["Any", "India", "Remote"]:
+        for levels in [None, ["junior"], ["mid", "senior"]]:
+            ix.search("ml engineer pytorch", 10, location=loc, levels=levels)  # must not raise
+    assert [j["id"] for j in ix.search("spark", 10, location="India")] == ["2"]

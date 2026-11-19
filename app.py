@@ -83,7 +83,7 @@ def filters(location, levels, company) -> dict:
 def companies() -> list[str]:
     if not JOBS_PATH.exists():
         return ["Any"]
-    return ["Any"] + sorted({json.loads(line)["company"] for line in JOBS_PATH.open()})
+    return ["Any"] + sorted({json.loads(line).get("company") or "" for line in JOBS_PATH.open() if line.strip()} - {""})
 
 
 def jobs_table(jobs: list[dict]) -> str:
@@ -272,4 +272,7 @@ with gr.Blocks(title="JobPilot") as demo:
         gr.ChatInterface(chat, additional_inputs=[uid])
 
 if __name__ == "__main__":
+    if JOBS_PATH.exists():
+        print("Loading the job index (new jobs get embedded now, so searches are instant later)...")
+        print(f"ready: {len(get_index().jobs):,} jobs")
     demo.launch(css=CSS, theme=gr.themes.Soft())

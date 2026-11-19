@@ -44,6 +44,20 @@ def clean(text: str) -> str:
     return re.sub(r"\s+", " ", html.unescape(text)).strip()[:8000]
 
 
+FIELDS = ("id", "title", "company", "location", "url", "text", "posted_at")
+
+
+def normalize(j: dict) -> dict:
+    """Every field a plain string: boards send null/missing locations, dict locations, numeric ids."""
+    out = {}
+    for f in FIELDS:
+        v = j.get(f)
+        if isinstance(v, dict):
+            v = v.get("name") or v.get("location") or ""
+        out[f] = str(v).strip() if v is not None else ""
+    return out
+
+
 def greenhouse(board: str):
     for j in get_json(f"https://boards-api.greenhouse.io/v1/boards/{board}/jobs?content=true")["jobs"]:
         yield {"id": f"gh-{board}-{j['id']}", "title": j["title"], "company": board,
@@ -80,7 +94,7 @@ def remotive():
 def fetch(source):
     fn, arg = source
     try:
-        return source, [j for j in (fn(arg) if arg else fn()) if j["text"]], None
+        return source, [n for j in (fn(arg) if arg else fn()) if (n := normalize(j))["text"] and n["title"]], None
     except Exception as e:  # one dead board must not kill the daily refresh
         return source, [], e
 

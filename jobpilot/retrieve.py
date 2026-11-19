@@ -5,6 +5,7 @@
 import json
 import re
 import sys
+import threading
 from functools import cache
 from pathlib import Path
 
@@ -12,7 +13,7 @@ import faiss
 import numpy as np
 from rank_bm25 import BM25Okapi
 
-from .ingest import JOBS_PATH
+from .ingest import JOBS_PATH, normalize
 from .llm import EMBED_MODEL, embedder
 
 VEC_PATH = Path("data/vectors.npz")
@@ -93,7 +94,7 @@ class Index:
     def build(cls, chunk: int = 256) -> "Index":
         """Load jobs and embed only the ones not seen before (the index changes daily).
         Saves after every chunk, so an interrupted run resumes where it stopped."""
-        jobs = [json.loads(line) for line in JOBS_PATH.open()]
+        jobs = [normalize(json.loads(line)) for line in JOBS_PATH.open() if line.strip()]
         old = dict(np.load(VEC_PATH)) if VEC_PATH.exists() else {}
         same_model = str(old.get("model", "")) == EMBED_MODEL
         cached = dict(zip(old["ids"], old["vecs"])) if same_model else {}
@@ -149,9 +150,18 @@ def reranker():
     return CrossEncoder(RERANKER)
 
 
+_lock = threading.Lock()
+
+
 @cache
-def get_index() -> Index:
+def _index() -> Index:
     return Index.build()
+
+
+def get_index() -> Index:
+    """Built once; the lock stops two simultaneous first searches from embedding everything twice."""
+    with _lock:
+        return _index()
 
 
 if __name__ == "__main__":
