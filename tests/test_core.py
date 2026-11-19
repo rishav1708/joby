@@ -76,3 +76,28 @@ def test_match_graph_rewrites_then_analyzes(monkeypatch):
     out = graph.match_graph.invoke({"resume_path": "r.pdf"}, {"configurable": {"thread_id": str(uuid.uuid4())}})
     assert out["attempts"] == 1 and out["query"] == "ml engineer pytorch"
     assert len(out["relevant"]) == 3 and len(out["contexts"]) == 3
+
+
+def test_build_resumes_and_skips_cached(tmp_path, monkeypatch):
+    import json
+    from jobpilot import retrieve
+    calls = []
+    fake = DeterministicFakeEmbedding(size=16)
+
+    class Counting:
+        def embed_documents(self, texts):
+            calls.append(len(texts))
+            return fake.embed_documents(texts)
+
+        def embed_query(self, text):
+            return fake.embed_query(text)
+
+    jobs_path = tmp_path / "jobs.jsonl"
+    jobs_path.write_text("".join(json.dumps(j) + "\n" for j in JOBS))
+    monkeypatch.setattr(retrieve, "JOBS_PATH", jobs_path)
+    monkeypatch.setattr(retrieve, "VEC_PATH", tmp_path / "vectors.npz")
+    monkeypatch.setattr(retrieve, "embedder", Counting)
+    retrieve.Index.build(chunk=2)
+    assert calls == [2, 1]  # saved in chunks
+    retrieve.Index.build(chunk=2)
+    assert calls == [2, 1]  # second build embeds nothing new

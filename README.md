@@ -23,7 +23,7 @@ chat agent: Gemini + tools (search_jobs, get_job), memory via LangGraph SQLite c
 | Path | What it does |
 |---|---|
 | `jobpilot/ingest.py` | Pulls live postings from Greenhouse, Lever and Remotive public APIs. Runs daily in CI. |
-| `jobpilot/retrieve.py` | BM25 + Gemini embeddings in FAISS, fused with reciprocal rank fusion, reranked by a cross-encoder. Only new postings get embedded. |
+| `jobpilot/retrieve.py` | BM25 + local bge-small embeddings in FAISS, fused with reciprocal rank fusion, reranked by a cross-encoder. Only new postings get embedded. |
 | `jobpilot/vlm.py` | Gemini vision reads resumes and job-post screenshots into Pydantic schemas. Also a text-layer/OCR baseline for comparison. |
 | `jobpilot/graph.py` | Two LangGraph graphs: the corrective-RAG match pipeline and a tool-calling chat agent with persistent memory. |
 | `evals/retrieval.py` | Recall@10, nDCG@10, MRR for BM25 vs dense vs hybrid vs hybrid+rerank. Labels by LLM pooling, then hand-checked. |
@@ -40,14 +40,14 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 export GOOGLE_API_KEY=...            # free key from aistudio.google.com
 python -m jobpilot.ingest            # fetch jobs -> data/jobs.jsonl
-python -m jobpilot.retrieve "junior ML engineer pytorch"   # first run embeds the jobs
+python -m jobpilot.retrieve "junior ML engineer pytorch"   # first run embeds the jobs locally (resumes if interrupted)
 python -m jobpilot.graph my_resume.pdf
 python app.py
 ```
 
 Offline tests (no key needed, run inside the venv): `GOOGLE_API_KEY=x python -m pytest -q`
 
-Models default to `gemini-3.5-flash` and `gemini-embedding-001`; override with `JOBPILOT_LLM` / `JOBPILOT_EMBED`.
+Models default to `gemini-3.5-flash` (chat + vision) and local `BAAI/bge-small-en-v1.5` embeddings (no API quota); override with `JOBPILOT_LLM` / `JOBPILOT_EMBED`.
 
 ## Results
 
@@ -56,7 +56,7 @@ _Fill in after running the evals._
 | Retrieval (30 queries) | Recall@10 | nDCG@10 | MRR |
 |---|---|---|---|
 | BM25 | | | |
-| Dense (Gemini + FAISS) | | | |
+| Dense (bge-small + FAISS) | | | |
 | Hybrid (RRF) | | | |
 | Hybrid + rerank | | | |
 

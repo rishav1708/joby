@@ -13,7 +13,7 @@ import numpy as np
 from rank_bm25 import BM25Okapi
 
 from .ingest import JOBS_PATH
-from .llm import embedder
+from .llm import EMBED_MODEL, embedder
 
 VEC_PATH = Path("data/vectors.npz")
 RERANKER = "cross-encoder/ms-marco-MiniLM-L-6-v2"
@@ -48,18 +48,23 @@ class Index:
         self.emb = emb or embedder()
 
     @classmethod
-    def build(cls) -> "Index":
-        """Load jobs and embed only the ones not seen before (the index changes daily)."""
+    def build(cls, chunk: int = 256) -> "Index":
+        """Load jobs and embed only the ones not seen before (the index changes daily).
+        Saves after every chunk, so an interrupted run resumes where it stopped."""
         jobs = [json.loads(line) for line in JOBS_PATH.open()]
-        old = dict(np.load(VEC_PATH, allow_pickle=True)) if VEC_PATH.exists() else {}
-        cached = dict(zip(old.get("ids", []), old.get("vecs", [])))
+        old = dict(np.load(VEC_PATH)) if VEC_PATH.exists() else {}
+        same_model = str(old.get("model", "")) == EMBED_MODEL
+        cached = dict(zip(old["ids"], old["vecs"])) if same_model else {}
         new = [j for j in jobs if j["id"] not in cached]
         emb = embedder()
-        if new:
-            print(f"embedding {len(new)} new jobs")
-            cached.update(zip([j["id"] for j in new], emb.embed_documents([doc_text(j) for j in new])))
+        for i in range(0, len(new), chunk):
+            batch = new[i:i + chunk]
+            cached.update(zip([j["id"] for j in batch], emb.embed_documents([doc_text(j) for j in batch])))
+            np.savez(VEC_PATH, ids=np.array(list(cached)), vecs=np.array(list(cached.values()), dtype="float32"),
+                     model=EMBED_MODEL)
+            print(f"embedded {min(i + chunk, len(new))}/{len(new)} new jobs")
         vecs = np.array([cached[j["id"]] for j in jobs], dtype="float32")
-        np.savez(VEC_PATH, ids=np.array([j["id"] for j in jobs]), vecs=vecs)
+        np.savez(VEC_PATH, ids=np.array([j["id"] for j in jobs]), vecs=vecs, model=EMBED_MODEL)  # drop expired jobs
         return cls(jobs, vecs, emb)
 
     def bm25_search(self, query: str, k: int = 50) -> list[str]:

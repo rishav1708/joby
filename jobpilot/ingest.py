@@ -12,7 +12,7 @@ from pathlib import Path
 JOBS_PATH = Path("data/jobs.jsonl")
 GREENHOUSE = ["anthropic", "databricks", "scaleai", "stripe", "figma", "discord",
               "robinhood", "coinbase", "gitlab", "airbnb", "dropbox", "pinterest"]
-LEVER = ["palantir", "plaid", "spotify"]
+LEVER = ["palantir", "spotify"]
 
 
 def get_json(url: str):
