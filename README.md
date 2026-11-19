@@ -33,8 +33,10 @@ chat agent: Gemini + tools (search_jobs, get_job), memory via LangGraph SQLite c
 
 ## Run it
 
+On macOS (and most Linux), the command is `python3`, not `python`. Once the venv is active, `python` works too.
+
 ```bash
-python -m venv .venv && source .venv/bin/activate
+python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 export GOOGLE_API_KEY=...            # free key from aistudio.google.com
 python -m jobpilot.ingest            # fetch jobs -> data/jobs.jsonl
@@ -43,7 +45,7 @@ python -m jobpilot.graph my_resume.pdf
 python app.py
 ```
 
-Offline tests (no key needed): `GOOGLE_API_KEY=x python -m pytest -q`
+Offline tests (no key needed, run inside the venv): `GOOGLE_API_KEY=x python -m pytest -q`
 
 Models default to `gemini-3.5-flash` and `gemini-embedding-001`; override with `JOBPILOT_LLM` / `JOBPILOT_EMBED`.
 
