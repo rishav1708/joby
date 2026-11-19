@@ -1,3 +1,4 @@
+# Runtime (also what the Hugging Face Space installs; the Space provides gradio itself)
 langchain-core>=1.0
 langchain-google-genai>=4.0
 langgraph>=1.0
@@ -8,8 +9,4 @@ sentence-transformers
 numpy
 pydantic>=2
 pypdf
-pytesseract
 pillow
-ragas
-gradio
-pytest

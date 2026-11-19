@@ -37,7 +37,7 @@ On macOS (and most Linux), the command is `python3`, not `python`. Once the venv
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 export GOOGLE_API_KEY=...            # free key from aistudio.google.com
 python -m jobpilot.ingest            # fetch jobs -> data/jobs.jsonl
 python -m jobpilot.retrieve "junior ML engineer pytorch"   # first run embeds the jobs locally (resumes if interrupted)
@@ -48,6 +48,16 @@ python app.py                        # home page at http://127.0.0.1:7860
 Offline tests (no key needed, run inside the venv): `GOOGLE_API_KEY=x python -m pytest -q`
 
 Models default to `gemini-3.5-flash` (chat + vision) and local `BAAI/bge-small-en-v1.5` embeddings (no API quota); override with `JOBPILOT_LLM` / `JOBPILOT_EMBED`. If Gemini is overloaded (503) or out of quota (429), calls fall back to `gemini-3.5-flash-lite` (`JOBPILOT_LLM_FALLBACK`, empty to disable).
+
+## Deploy (Hugging Face Spaces, free)
+
+The GitHub Action tests every push, then (once configured) fetches fresh jobs, embeds the new ones and
+pushes the app plus the index to a Space in one commit. It also runs daily at 07:00 IST.
+
+1. Create a Hugging Face **write** token and save it as the GitHub repo secret `HF_TOKEN`.
+2. Add the GitHub repo variable `HF_SPACE`, e.g. `yourname/jobpilot` (the Space is created on first deploy).
+3. Run the `ci` workflow once from the Actions tab.
+4. In the Space's Settings → Variables and secrets, add the secret `GOOGLE_API_KEY`.
 
 ## Results
 

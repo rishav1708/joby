@@ -378,7 +378,9 @@ with gr.Blocks(title="JobPilot") as demo:
     demo.load(lambda: (header(), eval_tables()), None, [top, evals])
 
 if __name__ == "__main__":
-    if JOBS_PATH.exists():
-        print("Loading the job index (new jobs get embedded now, so searches are instant later)...")
-        print(f"ready: {len(get_index().jobs):,} jobs")
+    if not JOBS_PATH.exists():  # fresh machine or Space without a prebuilt index
+        from jobpilot import ingest
+        ingest.main()
+    print("Loading the job index (new jobs get embedded now, so searches are instant later)...")
+    print(f"ready: {len(get_index().jobs):,} jobs")
     demo.launch(css=CSS, theme=THEME, js=FORCE_LIGHT)

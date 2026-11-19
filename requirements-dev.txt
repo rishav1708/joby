@@ -1,0 +1,7 @@
+# Local development: the app, evals and tests
+-r requirements.txt
+gradio
+ragas
+pytesseract
+pytest
+huggingface_hub

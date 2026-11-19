@@ -2,3 +2,6 @@ __pycache__/
 .venv/
 .env
 data/memory.db*
+data/jobs.jsonl
+data/vectors.npz
+data/profiles/
