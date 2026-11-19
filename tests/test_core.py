@@ -211,3 +211,24 @@ def test_match_graph_applies_filters_on_every_retrieve(monkeypatch, tmp_path):
     for hits in seen:
         assert {j["id"] for j in hits} == {"gh-0", "gh-3"}
         assert all(matches(j, **filters) for j in hits)
+
+
+def test_ingest_skips_dead_boards_and_reads_ashby(tmp_path, monkeypatch, capsys):
+    from jobpilot import ingest
+    ashby = {"jobs": [{"id": "7", "title": "ML Engineer", "location": "Bengaluru", "isRemote": False,
+                       "jobUrl": "u", "descriptionPlain": "train models"}]}
+
+    def fake_get(url):
+        if "ashbyhq" in url and "openai" in url:
+            return ashby
+        raise OSError("HTTP Error 404: Not Found")
+
+    monkeypatch.setattr(ingest, "get_json", fake_get)
+    monkeypatch.setattr(ingest, "JOBS_PATH", tmp_path / "jobs.jsonl")
+    monkeypatch.setattr(ingest, "GREENHOUSE", ["gone"])
+    monkeypatch.setattr(ingest, "LEVER", [])
+    monkeypatch.setattr(ingest, "ASHBY", ["openai"])
+    ingest.main()
+    out = capsys.readouterr().out
+    assert "wrote 1 jobs from 1 companies" in out and "greenhouse:gone" in out and "remotive" in out
+    assert '"company": "openai"' in (tmp_path / "jobs.jsonl").read_text()

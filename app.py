@@ -53,7 +53,7 @@ def index_stats() -> str:
     jobs = [json.loads(line) for line in JOBS_PATH.open()]
     updated = time.strftime("%d %b %Y, %H:%M", time.localtime(JOBS_PATH.stat().st_mtime))
     return (f"**{len(jobs):,} live jobs** from **{len({j['company'] for j in jobs})} companies** "
-            f"(Greenhouse, Lever, Remotive) · refreshed {updated}")
+            f"(Greenhouse, Lever, Ashby, Remotive) · refreshed {updated}")
 
 
 def eval_tables() -> str:
