@@ -110,6 +110,7 @@ def test_seniority():
     assert seniority("Staff ML Engineer") == "senior"
     assert seniority("Tech Lead, Inference") == "senior"
     assert seniority("Machine Learning Engineer") == "mid"
+    assert seniority("Software Engineer III") == "senior"
 
 
 def test_junior_query_ranks_entry_level_first():
@@ -126,3 +127,20 @@ def test_junior_query_ranks_entry_level_first():
     junior = [j["id"] for j in ix.search("junior ML engineer pytorch", 4)]
     assert junior[0] == "j1" and junior[-2:] == ["s1", "s2"]
     assert [j["id"] for j in ix.search("ML engineer pytorch", 4)] == order  # no boost without junior intent
+
+
+def test_file_block_detects_type_from_bytes(tmp_path):
+    import pytest
+    from jobpilot.vlm import file_block
+    pdf = tmp_path / "resume"  # no extension
+    pdf.write_bytes(b"%PDF-1.7 ...")
+    assert file_block(pdf)["mime_type"] == "application/pdf"
+    png = tmp_path / "shot.pdf"  # wrong extension
+    png.write_bytes(b"\x89PNG\r\n\x1a\n...")
+    assert file_block(png)["mime_type"] == "image/png"
+    docx = tmp_path / "cv.docx"
+    docx.write_bytes(b"PK\x03\x04...")
+    with pytest.raises(ValueError, match="export it as PDF"):
+        file_block(docx)
+    with pytest.raises(FileNotFoundError):
+        file_block(tmp_path / "missing.pdf")

@@ -19,8 +19,11 @@ VEC_PATH = Path("data/vectors.npz")
 RERANKER = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 JUNIOR = re.compile(r"\b(intern(ship)?|junior|jr|new[- ]grad(uate)?|graduate|entry[- ]level|early[- ]career|"
                     r"apprentice|trainee|fresher|student)\b", re.I)
-SENIOR = re.compile(r"\b(senior|sr|staff|principal|lead|head|director|manager|architect|vp|distinguished)\b", re.I)
-SHIFT = {"junior": -5, "mid": 0, "senior": 10}  # rank positions moved after rerank; tune on the eval set
+SENIOR = re.compile(r"\b(senior|sr|staff|principal|lead|head|director|manager|architect|vp|distinguished|"
+                    r"iii|iv|[3-9])\b", re.I)  # "Engineer III" / "Engineer 3" count as senior
+# rank positions moved after rerank. Senior's shift is effectively a filter: senior roles only appear
+# after every junior/mid candidate, as a fallback when there aren't k of those.
+SHIFT = {"junior": -5, "mid": 0, "senior": 1000}
 
 
 def seniority(title: str) -> str:
@@ -28,7 +31,7 @@ def seniority(title: str) -> str:
 
 
 def seniority_boost(ids: list[str], titles: dict[str, str]) -> list[str]:
-    """Soft re-sort for entry-level searches: junior roles move up, senior/staff/lead roles move down."""
+    """Entry-level searches: junior roles move up; senior/staff/lead roles go last (filter-first, with fallback)."""
     return [d for _, d in sorted((i + SHIFT[seniority(titles[d])], d) for i, d in enumerate(ids))]
 
 
@@ -103,7 +106,7 @@ class Index:
             junior = bool(JUNIOR.search(query))
         if not junior:
             return [self.jobs[i] for i in self.rerank(query, self.hybrid_search(query, 30), k)]
-        ids = self.rerank(query, self.hybrid_search(query, 60), 60)  # wider pool: senior roles dominate the index
+        ids = self.rerank(query, self.hybrid_search(query, 100), 100)  # wide pool: senior roles dominate the index
         return [self.jobs[i] for i in seniority_boost(ids, {i: self.jobs[i]["title"] for i in ids})[:k]]
 
 

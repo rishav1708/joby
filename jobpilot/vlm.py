@@ -4,7 +4,6 @@
     python -m jobpilot.vlm post.png --job      # JobPost
 """
 import base64
-import mimetypes
 import sys
 from pathlib import Path
 
@@ -36,12 +35,21 @@ class JobPost(BaseModel):
 PROMPT = "Extract the {name} from this document. Only use what is visible; never invent skills."
 
 
+MAGIC = {b"%PDF": "application/pdf", b"\x89PNG": "image/png", b"\xff\xd8\xff": "image/jpeg",
+         b"GIF8": "image/gif", b"RIFF": "image/webp"}
+
+
 def file_block(path: Path) -> dict:
-    mime = mimetypes.guess_type(path)[0] or "application/octet-stream"
-    if not (mime.startswith("image/") or mime == "application/pdf"):
-        raise ValueError(f"unsupported file type: {mime}")
-    data = base64.b64encode(path.read_bytes()).decode()
-    return {"type": "file", "source_type": "base64", "mime_type": mime, "data": data}
+    """Detect PDF/image from the file's first bytes (extension can be missing or wrong)."""
+    path = Path(path).expanduser()
+    if not path.is_file():
+        raise FileNotFoundError(f"no file at {path.resolve()} - check the path (quote it if it has spaces)")
+    data = path.read_bytes()
+    mime = next((m for sig, m in MAGIC.items() if data.startswith(sig)), None)
+    if mime is None:
+        raise ValueError(f"{path.name} is not a PDF, PNG, JPEG, GIF or WebP file "
+                         "(for .docx or Pages, export it as PDF first)")
+    return {"type": "file", "source_type": "base64", "mime_type": mime, "data": base64.b64encode(data).decode()}
 
 
 def read(path: str | Path, schema: type[BaseModel] = Profile) -> BaseModel:
