@@ -1,4 +1,4 @@
-"""Gradio app: home page (upload, search, how it works, eval results) + chat agent. Set GOOGLE_API_KEY first.
+"""Gradio app: home page (upload, search, resume rating, eval results) + chat agent. Set GOOGLE_API_KEY first.
 
     python app.py      # then open http://127.0.0.1:7860
 """
@@ -17,11 +17,6 @@ from jobpilot.retrieve import get_index, seniority
 
 CSS = """
 .hero h1 {font-size: 2.4rem; margin-bottom: .2rem}
-.pipeline {display: flex; flex-wrap: wrap; gap: .5rem; align-items: stretch}
-.step {flex: 1 1 180px; border: 1px solid var(--border-color-primary); border-radius: 10px; padding: .8rem;
-       background: var(--background-fill-secondary)}
-.step b {display: block; margin-bottom: .3rem}
-.arrow {align-self: center; font-size: 1.4rem; opacity: .6}
 .rating {display: flex; flex-wrap: wrap; gap: 1.5rem; align-items: center; padding: 1rem;
          border: 1px solid var(--border-color-primary); border-radius: 12px; background: var(--background-fill-secondary)}
 .score {width: 120px; height: 120px; border-radius: 50%; display: grid; place-items: center; font-size: 2.2rem;
@@ -33,23 +28,6 @@ CSS = """
 .reason {font-size: .85rem; opacity: .75}
 .fixes {flex: 1 1 260px} .fixes ol {margin: .3rem 0 0 1.1rem}
 """
-
-PIPELINE = """
-<div class="pipeline">
-  <div class="step"><b>1 · Read (VLM)</b>Gemini vision reads your resume PDF, scan or screenshot into a validated
-    Pydantic profile: skills, years, target roles.</div>
-  <div class="arrow">→</div>
-  <div class="step"><b>2 · Retrieve (hybrid RAG)</b>BM25 + bge-small embeddings in FAISS, fused with reciprocal
-    rank fusion, reranked by a cross-encoder, with seniority-aware ranking for students.</div>
-  <div class="arrow">→</div>
-  <div class="step"><b>3 · Grade &amp; retry (LangGraph)</b>An LLM grades each job. Fewer than 3 good fits? The agent
-    rewrites the query and searches again (corrective RAG).</div>
-  <div class="arrow">→</div>
-  <div class="step"><b>4 · Rate &amp; analyse (RAG)</b>One structured Gemini call reads your resume and the
-    retrieved jobs: a score out of 100, the top 3 fixes, and per-job gaps with a tailored bullet.</div>
-</div>
-"""
-
 
 def index_stats() -> str:
     if not JOBS_PATH.exists():
@@ -189,8 +167,6 @@ with gr.Blocks(title="JobPilot") as demo:
         report = gr.Markdown()
         with gr.Accordion("Details: parsed profile (VLM output)", open=False):
             profile = gr.JSON(show_label=False)
-        gr.Markdown("## How it works")
-        gr.HTML(PIPELINE)
         gr.Markdown("## Evaluation")
         evals = gr.Markdown()
         gr.Markdown("Code: [github.com/rishav1708/joby](https://github.com/rishav1708/joby)")
