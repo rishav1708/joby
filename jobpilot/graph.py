@@ -5,6 +5,8 @@ chat_graph:  tool-calling agent (search_jobs, get_job) with SQLite-checkpointed 
 
     python -m jobpilot.graph resume.pdf
 """
+import hashlib
+import json
 import sqlite3
 import sys
 from pathlib import Path
@@ -21,7 +23,9 @@ from . import vlm
 from .llm import llm
 from .retrieve import get_index
 
-MAX_REWRITES = 2
+MAX_REWRITES = 1  # each rewrite costs 2 Gemini calls; one retry catches most bad queries
+ANALYZE_JOBS = 3
+PROFILE_CACHE = Path("data/profiles")
 MIN_RELEVANT = 3
 Path("data").mkdir(exist_ok=True)
 memory = SqliteSaver(sqlite3.connect("data/memory.db", check_same_thread=False))
@@ -30,6 +34,7 @@ memory = SqliteSaver(sqlite3.connect("data/memory.db", check_same_thread=False))
 # ---------- match graph ----------
 class MatchState(TypedDict, total=False):
     resume_path: str
+    filters: dict  # passed to Index.search: location, levels, company
     profile: dict
     query: str
     attempts: int
@@ -44,14 +49,21 @@ class Grades(BaseModel):
 
 
 def parse(s: MatchState) -> MatchState:
-    p = vlm.read(s["resume_path"], vlm.Profile).model_dump()
+    """VLM call, cached by file hash: re-running the same resume costs nothing."""
+    PROFILE_CACHE.mkdir(parents=True, exist_ok=True)
+    cached = PROFILE_CACHE / (hashlib.sha256(Path(s["resume_path"]).read_bytes()).hexdigest()[:16] + ".json")
+    if cached.exists():
+        p = json.loads(cached.read_text())
+    else:
+        p = vlm.read(s["resume_path"], vlm.Profile).model_dump()
+        cached.write_text(json.dumps(p))
     return {"profile": p, "query": f"{' / '.join(p['target_roles'])}. Skills: {', '.join(p['skills'][:15])}",
             "attempts": 0}
 
 
 def retrieve(s: MatchState) -> MatchState:
     junior = s["profile"]["years_experience"] < 2 or None  # students/new grads get entry-level ranking
-    return {"hits": get_index().search(s["query"], k=10, junior=junior)}
+    return {"hits": get_index().search(s["query"], k=10, junior=junior, **s.get("filters", {}))}
 
 
 def grade(s: MatchState) -> MatchState:
@@ -79,8 +91,8 @@ def rewrite(s: MatchState) -> MatchState:
 
 
 def analyze(s: MatchState) -> MatchState:
-    jobs = (s["relevant"] or s["hits"])[:5]
-    contexts = [f"[{j['id']}] {j['title']} at {j['company']} ({j['location']})\n{j['text'][:2500]}" for j in jobs]
+    jobs = (s["relevant"] or s["hits"])[:ANALYZE_JOBS]
+    contexts = [f"[{j['id']}] {j['title']} at {j['company']} ({j['location']})\n{j['text'][:1500]}" for j in jobs]
     context = "\n\n".join(contexts)
     report = llm().invoke(
         "You are a career coach. Using ONLY the job descriptions below, for each job give: a fit score 0-10, "

@@ -12,8 +12,10 @@ QUERY_PREFIX = "Represent this sentence for searching relevant passages: "  # bg
 
 
 def llm(temperature: float = 0.0) -> ChatGoogleGenerativeAI:
-    # max_retries rides out free-tier 429s with backoff
-    return ChatGoogleGenerativeAI(model=LLM_MODEL, temperature=temperature, max_retries=6)
+    # Extraction/grading don't need deep reasoning: low thinking cuts latency a lot on Gemini 3+.
+    # Few retries + a request timeout so a free-tier 429 surfaces in seconds instead of minutes of backoff.
+    thinking = {} if LLM_MODEL.startswith("gemini-2") else {"thinking_level": os.getenv("JOBPILOT_THINKING", "low")}
+    return ChatGoogleGenerativeAI(model=LLM_MODEL, temperature=temperature, max_retries=2, timeout=60, **thinking)
 
 
 class LocalEmbeddings(Embeddings):

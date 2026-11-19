@@ -26,6 +26,10 @@ SENIOR = re.compile(r"\b(senior|sr|staff|principal|lead|head|director|manager|ar
 SHIFT = {"junior": -5, "mid": 0, "senior": 1000}
 
 
+INDIA = re.compile(r"india|bengaluru|bangalore|hyderabad|pune|mumbai|delhi|gurgaon|gurugram|noida|chennai|kolkata",
+                   re.I)
+
+
 def seniority(title: str) -> str:
     return "junior" if JUNIOR.search(title) else "senior" if SENIOR.search(title) else "mid"
 
@@ -33,6 +37,28 @@ def seniority(title: str) -> str:
 def seniority_boost(ids: list[str], titles: dict[str, str]) -> list[str]:
     """Entry-level searches: junior roles move up; senior/staff/lead roles go last (filter-first, with fallback)."""
     return [d for _, d in sorted((i + SHIFT[seniority(titles[d])], d) for i, d in enumerate(ids))]
+
+
+def matches(j: dict, location: str = "Any", levels: list[str] | None = None, company: str | None = None) -> bool:
+    """Hard filters. location: Any | India | Remote; levels: subset of junior/mid/senior."""
+    if location == "India" and not INDIA.search(j["location"]):
+        return False
+    if location == "Remote" and not (j["id"].startswith("rm-") or "remote" in j["location"].lower()):
+        return False
+    if levels and seniority(j["title"]) not in levels:
+        return False
+    return not company or j["company"] == company
+
+
+def diversify(ids: list[str], company: dict[str, str], k: int, per_company: int = 3) -> list[str]:
+    """Keep ranking order but allow at most per_company jobs per company; backfill if that leaves < k."""
+    seen: dict[str, int] = {}
+    picked = []
+    for d in ids:
+        if seen.get(company[d], 0) < per_company:
+            picked.append(d)
+            seen[company[d]] = seen.get(company[d], 0) + 1
+    return (picked + [d for d in ids if d not in picked])[:k]
 
 
 def tokenize(text: str) -> list[str]:
@@ -100,14 +126,21 @@ class Index:
         scores = reranker().predict([(query, doc_text(self.jobs[i])) for i in ids])
         return [ids[i] for i in np.argsort(-scores)[:k]]
 
-    def search(self, query: str, k: int = 10, junior: bool | None = None) -> list[dict]:
-        """junior=None infers entry-level intent from the query ("intern", "new grad", "junior", ...)."""
+    def search(self, query: str, k: int = 10, junior: bool | None = None, location: str = "Any",
+               levels: list[str] | None = None, company: str | None = None, per_company: int = 3) -> list[dict]:
+        """Hybrid retrieve -> filter -> cross-encoder rerank -> seniority boost -> per-company cap.
+        junior=None infers entry-level intent from the query ("intern", "new grad", "junior", ...)."""
         if junior is None:
             junior = bool(JUNIOR.search(query))
-        if not junior:
-            return [self.jobs[i] for i in self.rerank(query, self.hybrid_search(query, 30), k)]
-        ids = self.rerank(query, self.hybrid_search(query, 100), 100)  # wide pool: senior roles dominate the index
-        return [self.jobs[i] for i in seniority_boost(ids, {i: self.jobs[i]["title"] for i in ids})[:k]]
+        filtered = location != "Any" or bool(levels) or bool(company)
+        pool = self.hybrid_search(query, 500 if filtered else 100)  # filters need a deep pool to survive
+        pool = [d for d in pool if matches(self.jobs[d], location, levels, company)]
+        pool = pool[:100] if junior or filtered else pool[:60]  # 60+ so the per-company cap has room
+        ids = self.rerank(query, pool, len(pool)) if pool else []
+        if junior:
+            ids = seniority_boost(ids, {d: self.jobs[d]["title"] for d in ids})  # senior roles go last
+        ids = ids[:k] if company else diversify(ids, {d: self.jobs[d]["company"] for d in ids}, k, per_company)
+        return [self.jobs[d] for d in ids]
 
 
 @cache

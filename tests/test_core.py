@@ -67,15 +67,19 @@ class FakeLLM:
         return type("Msg", (), {"text": "ml engineer pytorch"})()
 
 
-def test_match_graph_rewrites_then_analyzes(monkeypatch):
+def test_match_graph_rewrites_then_analyzes(monkeypatch, tmp_path):
     ix = fake_index()
+    resume = tmp_path / "r.pdf"
+    resume.write_bytes(uuid.uuid4().bytes)  # unique bytes, so the profile cache misses
+    monkeypatch.setattr(graph, "PROFILE_CACHE", tmp_path / "profiles")
     monkeypatch.setattr(graph, "get_index", lambda: ix)
     monkeypatch.setattr(graph, "llm", FakeLLM)
     monkeypatch.setattr(graph.vlm, "read", lambda path, schema: graph.vlm.Profile(
         headline="student", skills=["pytorch"], years_experience=0, target_roles=["ML Engineer"]))
-    out = graph.match_graph.invoke({"resume_path": "r.pdf"}, {"configurable": {"thread_id": str(uuid.uuid4())}})
+    out = graph.match_graph.invoke({"resume_path": str(resume)}, {"configurable": {"thread_id": str(uuid.uuid4())}})
     assert out["attempts"] == 1 and out["query"] == "ml engineer pytorch"
     assert len(out["relevant"]) == 3 and len(out["contexts"]) == 3
+    assert len(list((tmp_path / "profiles").iterdir())) == 1  # profile cached for next time
 
 
 def test_build_resumes_and_skips_cached(tmp_path, monkeypatch):
@@ -144,3 +148,15 @@ def test_file_block_detects_type_from_bytes(tmp_path):
         file_block(docx)
     with pytest.raises(FileNotFoundError):
         file_block(tmp_path / "missing.pdf")
+
+
+def test_filters_and_company_cap():
+    from jobpilot.retrieve import diversify, matches
+    j = {"id": "gh-x-1", "title": "Senior ML Engineer", "company": "databricks", "location": "Bengaluru, India"}
+    assert matches(j, "India") and not matches(j, "Remote")
+    assert matches({**j, "id": "rm-9", "location": "Worldwide"}, "Remote")
+    assert not matches(j, levels=["junior", "mid"]) and matches(j, levels=["senior"])
+    assert not matches(j, company="stripe")
+    ids = ["d1", "d2", "d3", "d4", "s1", "d5"]
+    comp = {d: "databricks" if d[0] == "d" else "stripe" for d in ids}
+    assert diversify(ids, comp, 4, per_company=2) == ["d1", "d2", "s1", "d3"]  # cap, then backfill in order
