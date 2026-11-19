@@ -47,7 +47,7 @@ python app.py                        # home page at http://127.0.0.1:7860
 
 Offline tests (no key needed, run inside the venv): `GOOGLE_API_KEY=x python -m pytest -q`
 
-Models default to `gemini-3.5-flash` (chat + vision) and local `BAAI/bge-small-en-v1.5` embeddings (no API quota); override with `JOBPILOT_LLM` / `JOBPILOT_EMBED`.
+Models default to `gemini-3.5-flash` (chat + vision) and local `BAAI/bge-small-en-v1.5` embeddings (no API quota); override with `JOBPILOT_LLM` / `JOBPILOT_EMBED`. If Gemini is overloaded (503) or out of quota (429), calls fall back to `gemini-3.5-flash-lite` (`JOBPILOT_LLM_FALLBACK`, empty to disable).
 
 ## Results
 

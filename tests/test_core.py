@@ -160,3 +160,18 @@ def test_filters_and_company_cap():
     ids = ["d1", "d2", "d3", "d4", "s1", "d5"]
     comp = {d: "databricks" if d[0] == "d" else "stripe" for d in ids}
     assert diversify(ids, comp, 4, per_company=2) == ["d1", "d2", "s1", "d3"]  # cap, then backfill in order
+
+
+def test_llm_falls_back_on_overload(monkeypatch):
+    from langchain_core.language_models.fake_chat_models import FakeListChatModel
+    from jobpilot import llm as llm_mod
+
+    class Overloaded(FakeListChatModel):
+        def _call(self, *a, **k):
+            raise RuntimeError("503 UNAVAILABLE. This model is currently experiencing high demand.")
+
+    def fake(model, temperature):
+        return Overloaded(responses=["x"]) if model == llm_mod.LLM_MODEL else FakeListChatModel(responses=["backup"])
+
+    monkeypatch.setattr(llm_mod, "_gemini", fake)
+    assert llm_mod.llm().invoke("hi").content == "backup"

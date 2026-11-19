@@ -1,5 +1,5 @@
 """Model clients. Chat/VLM on the Gemini free tier; embeddings run locally so indexing never hits API quota.
-Override models with env vars (JOBPILOT_LLM, JOBPILOT_EMBED)."""
+Override models with env vars (JOBPILOT_LLM, JOBPILOT_LLM_FALLBACK, JOBPILOT_EMBED)."""
 import os
 from functools import cache
 
@@ -7,15 +7,25 @@ from langchain_core.embeddings import Embeddings
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 LLM_MODEL = os.getenv("JOBPILOT_LLM", "gemini-3.5-flash")
+FALLBACK_MODEL = os.getenv("JOBPILOT_LLM_FALLBACK", "gemini-3.5-flash-lite")  # "" disables
 EMBED_MODEL = os.getenv("JOBPILOT_EMBED", "BAAI/bge-small-en-v1.5")
 QUERY_PREFIX = "Represent this sentence for searching relevant passages: "  # bge retrieval instruction
 
 
-def llm(temperature: float = 0.0) -> ChatGoogleGenerativeAI:
-    # Extraction/grading don't need deep reasoning: low thinking cuts latency a lot on Gemini 3+.
-    # Few retries + a request timeout so a free-tier 429 surfaces in seconds instead of minutes of backoff.
-    thinking = {} if LLM_MODEL.startswith("gemini-2") else {"thinking_level": os.getenv("JOBPILOT_THINKING", "low")}
-    return ChatGoogleGenerativeAI(model=LLM_MODEL, temperature=temperature, max_retries=2, timeout=60, **thinking)
+def _gemini(model: str, temperature: float) -> ChatGoogleGenerativeAI:
+    # Low thinking: extraction/grading don't need deep reasoning and it cuts latency a lot on Gemini 3+.
+    # max_retries=3 -> 2 SDK retries with backoff on 429/5xx, then we fall back instead of waiting minutes.
+    thinking = {} if model.startswith("gemini-2") else {"thinking_level": os.getenv("JOBPILOT_THINKING", "low")}
+    return ChatGoogleGenerativeAI(model=model, temperature=temperature, max_retries=3, timeout=60, **thinking)
+
+
+def llm(temperature: float = 0.0):
+    """Primary Gemini model, falling back to a lighter free model on 503 overload / 429 quota.
+    Supports .with_structured_output() and .bind_tools() like a plain chat model."""
+    primary = _gemini(LLM_MODEL, temperature)
+    if not FALLBACK_MODEL or FALLBACK_MODEL == LLM_MODEL:
+        return primary
+    return primary.with_fallbacks([_gemini(FALLBACK_MODEL, temperature)])
 
 
 class LocalEmbeddings(Embeddings):

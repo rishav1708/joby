@@ -122,6 +122,9 @@ def match(file, location, levels, company):
     except gr.Error:
         raise
     except Exception as e:
+        if "503" in str(e) or "UNAVAILABLE" in str(e):
+            raise gr.Error("Gemini is overloaded right now (both the main and backup models). "
+                           "This is usually temporary, so please try again in a minute or two.")
         if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
             raise gr.Error("Gemini free-tier rate limit reached. Wait about a minute and try again "
                            "(your parsed resume is cached).")
