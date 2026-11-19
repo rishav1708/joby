@@ -29,7 +29,7 @@ chat agent: Gemini + tools (search_jobs, get_job), memory via LangGraph SQLite c
 | `evals/retrieval.py` | Recall@10, nDCG@10, MRR for BM25 vs dense vs hybrid vs hybrid+rerank. Labels by LLM pooling, then hand-checked. |
 | `evals/vlm.py` | Skill-extraction F1: VLM vs pypdf/OCR + LLM baseline on hand-labelled docs. |
 | `evals/rag.py` | RAGAS Faithfulness and Response Relevancy for the gap-analysis reports. |
-| `app.py` | Gradio demo (deploys free to Render). |
+| `app.py` | Gradio demo (deploys to Google Cloud Run). |
 
 ## Run it
 
@@ -49,16 +49,21 @@ Offline tests (no key needed, run inside the venv): `GOOGLE_API_KEY=x python -m 
 
 Models default to `gemini-3.5-flash` (chat + vision) and local `BAAI/bge-small-en-v1.5` embeddings (no API quota); override with `JOBPILOT_LLM` / `JOBPILOT_EMBED`. If Gemini is overloaded (503) or out of quota (429), calls fall back to `gemini-3.5-flash-lite` (`JOBPILOT_LLM_FALLBACK`, empty to disable).
 
-## Deploy (Render, free)
+## Deploy (Google Cloud Run, free tier)
 
 The GitHub Action tests every push, refreshes the jobs, embeds only the new ones and publishes the index
-as the `data` release. It also runs daily at 07:00 IST. Models run on ONNX (fastembed, no torch), so the
-app fits Render's free 512MB instance.
+as the `data` release (also daily at 07:00 IST). The container downloads that index when it starts, so
+every cold start serves current jobs. Cloud Run scales to zero between visits, which keeps a demo inside
+the free quota.
 
-1. On render.com, sign in with GitHub, then New → Blueprint and pick this repo (it reads `render.yaml`).
-2. When asked, paste a Gemini key from aistudio.google.com as `GOOGLE_API_KEY`.
+1. In the Google Cloud console, create a project with billing enabled, then open Cloud Run.
+2. Choose **Deploy container → Service → Continuously deploy from a repository**, connect GitHub and pick
+   this repo, branch `main`, build type **Dockerfile**.
+3. Region `us-central1`; authentication **Allow public access**; memory **2 GiB**, CPU **1**;
+   minimum instances **0**, maximum instances **1**.
+4. Under Variables & secrets, add `GOOGLE_API_KEY` (from aistudio.google.com). Create.
 
-The free instance sleeps after 15 idle minutes; the first visit after that takes about a minute.
+Every push to `main` then rebuilds and redeploys. The first visit after an idle spell takes about a minute.
 
 ## Results
 

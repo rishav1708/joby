@@ -14,6 +14,20 @@ jobs:
         with: { python-version: "3.12" }
       - run: pip install -r requirements-dev.txt
       - run: GOOGLE_API_KEY=x python -m pytest -q
+  image:
+    # Builds the Cloud Run image and checks that it serves the app within the startup window.
+    if: github.event_name == 'push'
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t jobpilot .
+      - run: |
+          docker run -d --name app -p 8080:8080 -e PORT=8080 -e GOOGLE_API_KEY=x --memory 2g jobpilot
+          for i in $(seq 120); do curl -sf localhost:8080/ >/dev/null && echo "up after ${i}x2s" && break; sleep 2; done
+          docker stats --no-stream app; docker logs app | tail -5
+          curl -sf localhost:8080/ >/dev/null
   data:
     # Refreshes the job index and publishes it as the "data" release; the hosted app downloads it on start.
     needs: test
