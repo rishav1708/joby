@@ -47,10 +47,12 @@ jobs:
         env: { GOOGLE_API_KEY: x }
         run: |
           python -c "
-          import resource, app
+          import re
+          rss = lambda tag: print(tag, *re.findall(r'(VmRSS|VmHWM):\s+(\d+)', open('/proc/self/status').read()))
+          import app; rss('imports')
           from jobpilot.retrieve import get_index
-          print(len(get_index().search('junior ML engineer pytorch')), 'hits')
-          print('peak RSS MB:', resource.getrusage(resource.RUSAGE_SELF).ru_maxrss // 1024)"
+          ix = get_index(); rss('index')
+          print(len(ix.search('junior ML engineer pytorch')), 'hits'); rss('search')"
       - run: |
           gh release view data >/dev/null 2>&1 || gh release create data --title "Job index" --notes "Refreshed daily by CI."
           gh release upload data data/jobs.jsonl data/vectors.npz --clobber

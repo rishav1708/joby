@@ -14,7 +14,7 @@ import numpy as np
 from rank_bm25 import BM25Okapi
 
 from .ingest import JOBS_PATH, normalize
-from .llm import EMBED_KEY, embedder
+from .llm import EMBED_KEY, EMBED_MAX_CHARS, embedder
 
 VEC_PATH = Path("data/vectors.npz")
 RERANKER = "Xenova/ms-marco-MiniLM-L-6-v2"  # ONNX export of cross-encoder/ms-marco-MiniLM-L-6-v2
@@ -125,7 +125,9 @@ class Index:
         return rrf([self.bm25_search(query, k), self.dense_search(query, k)])[:k]
 
     def rerank(self, query: str, ids: list[str], k: int = 10) -> list[str]:
-        scores = np.array(list(reranker().rerank(query, [doc_text(self.jobs[i]) for i in ids])))
+        # Short docs + small batches: attention memory is batch x heads x len^2, which hit ~2GB at 64 x 512 tokens.
+        docs = [doc_text(self.jobs[i])[:EMBED_MAX_CHARS] for i in ids]
+        scores = np.array(list(reranker().rerank(query, docs, batch_size=8)))
         return [ids[i] for i in np.argsort(-scores)[:k]]
 
     def search(self, query: str, k: int = 10, junior: bool | None = None, location: str = "Any",

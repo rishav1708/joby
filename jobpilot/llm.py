@@ -39,7 +39,7 @@ class LocalEmbeddings(Embeddings):
         self.model = TextEmbedding(model)
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        return [v.tolist() for v in self.model.embed([t[:EMBED_MAX_CHARS] for t in texts], batch_size=64)]
+        return [v.tolist() for v in self.model.embed([t[:EMBED_MAX_CHARS] for t in texts], batch_size=32)]
 
     def embed_query(self, text: str) -> list[float]:
         prefix = QUERY_PREFIX if "bge" in EMBED_MODEL.lower() else ""
