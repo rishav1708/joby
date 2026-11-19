@@ -42,7 +42,7 @@ export GOOGLE_API_KEY=...            # free key from aistudio.google.com
 python -m jobpilot.ingest            # fetch jobs -> data/jobs.jsonl
 python -m jobpilot.retrieve "junior ML engineer pytorch"   # first run embeds the jobs locally (resumes if interrupted)
 python -m jobpilot.graph my_resume.pdf
-python app.py
+python app.py                        # home page at http://127.0.0.1:7860
 ```
 
 Offline tests (no key needed, run inside the venv): `GOOGLE_API_KEY=x python -m pytest -q`

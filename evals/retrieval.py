@@ -11,6 +11,7 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
+from evals import save
 from jobpilot.llm import llm
 from jobpilot.retrieve import doc_text, get_index
 
@@ -65,10 +66,13 @@ def evaluate():
     ix = get_index()
     rows = [json.loads(line) for line in QRELS.open()]
     print(f"{'method':20} Recall@{K}  nDCG@{K}   MRR   (n={len(rows)} queries)")
+    table = {}
     for name, fn in methods(ix).items():
         r = [(recall(d, x["rel"]), ndcg(d, x["rel"]), mrr(d, x["rel"])) for x in rows for d in [fn(x["q"])]]
         avg = [sum(col) / len(r) for col in zip(*r)]
         print(f"{name:20} {avg[0]:.3f}      {avg[1]:.3f}    {avg[2]:.3f}")
+        table[name] = {f"Recall@{K}": avg[0], f"nDCG@{K}": avg[1], "MRR": avg[2]}
+    save("Retrieval", table, f"{len(rows)} labelled queries")
 
 
 if __name__ == "__main__":

@@ -11,6 +11,7 @@ from pathlib import Path
 from ragas import EvaluationDataset, evaluate
 from ragas.metrics import Faithfulness, ResponseRelevancy
 
+from evals import save
 from jobpilot.graph import match_graph
 from jobpilot.llm import embedder, llm
 
@@ -28,6 +29,8 @@ def main():
     result = evaluate(EvaluationDataset.from_list(samples), metrics=[Faithfulness(), ResponseRelevancy()],
                       llm=llm(), embeddings=embedder())
     print(result)
+    scores = result.to_pandas().select_dtypes("number").mean().to_dict()
+    save("RAG grounding (RAGAS)", {"JobPilot": scores}, f"{len(samples)} resumes")
 
 
 if __name__ == "__main__":

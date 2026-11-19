@@ -9,6 +9,7 @@ evals/vlm_labels.jsonl, one line per file (put the files in evals/docs/):
 import json
 from pathlib import Path
 
+from evals import save
 from jobpilot import vlm
 
 LABELS = Path("evals/vlm_labels.jsonl")
@@ -31,6 +32,7 @@ def skills_of(out) -> set[str]:
 
 def main():
     rows = [json.loads(line) for line in LABELS.open()]
+    table = {}
     for name, reader in [("vlm (gemini vision)", vlm.read), ("baseline (pypdf/ocr + llm)", vlm.read_baseline)]:
         scores, failures = [], 0
         for r in rows:
@@ -42,6 +44,8 @@ def main():
                 scores.append(0.0)
                 print(f"  {name} failed on {r['file']}: {e}")
         print(f"{name:28} skill F1 = {sum(scores) / len(scores):.3f}  failures = {failures}/{len(rows)}")
+        table[name] = {"Skill F1": sum(scores) / len(scores), "Failures": failures}
+    save("Resume / job-post extraction", table, f"{len(rows)} hand-labelled documents")
 
 
 if __name__ == "__main__":
